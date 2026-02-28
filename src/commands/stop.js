@@ -1,4 +1,4 @@
-const { getQueue, queues } = require('../musicPlayer');
+const { getQueue, killProcesses, queues } = require('../musicPlayer');
 
 module.exports = {
     name: 'stop',
@@ -12,6 +12,7 @@ module.exports = {
 
         queue.songs = [];
         clearInterval(queue._interval);
+        killProcesses(queue);
         queue.player.stop();
         queue.connection.destroy();
         queues.delete(message.guildId);

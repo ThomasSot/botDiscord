@@ -32,6 +32,7 @@ function createQueue(guildId, textChannel, voiceChannel) {
     // Cuando termina una canción, reproducir la siguiente
     player.on(AudioPlayerStatus.Idle, () => {
         clearInterval(queue._interval);
+        killProcesses(queue);
         queue.currentTime = 0;
         queue.songs.shift();
         if (queue.songs.length > 0) {
@@ -46,6 +47,7 @@ function createQueue(guildId, textChannel, voiceChannel) {
 
     player.on('error', (error) => {
         console.error('Error del player:', error.message);
+        killProcesses(queue);
         queue.textChannel.send(`Error reproduciendo: ${error.message}`);
         queue.songs.shift();
         if (queue.songs.length > 0) {
@@ -59,6 +61,7 @@ function createQueue(guildId, textChannel, voiceChannel) {
 
     connection.on(VoiceConnectionStatus.Disconnected, () => {
         clearInterval(queue._interval);
+        killProcesses(queue);
         queues.delete(guildId);
     });
 
@@ -132,9 +135,23 @@ async function searchSong(query) {
     });
 }
 
+function killProcesses(queue) {
+    if (queue._ytdlp) {
+        queue._ytdlp.kill('SIGKILL');
+        queue._ytdlp = null;
+    }
+    if (queue._ffmpeg) {
+        queue._ffmpeg.kill('SIGKILL');
+        queue._ffmpeg = null;
+    }
+}
+
 function playSong(guildId) {
     const queue = queues.get(guildId);
     if (!queue || queue.songs.length === 0) return;
+
+    // Matar procesos anteriores si existen
+    killProcesses(queue);
 
     const song = queue.songs[0];
     queue.playing = true;
@@ -158,19 +175,15 @@ function playSong(guildId) {
         'pipe:1',
     ]);
 
-    ytdlp.stdout.pipe(ffmpeg.stdin);
+    // Guardar referencia para poder matarlos al hacer skip/stop
+    queue._ytdlp = ytdlp;
+    queue._ffmpeg = ffmpeg;
 
-    ytdlp.stderr.on('data', (data) => {
-        // Silenciar stderr de yt-dlp
-    });
-
-    ytdlp.on('error', (err) => {
-        console.error('Error yt-dlp:', err.message);
-    });
-
-    ffmpeg.on('error', (err) => {
-        console.error('Error ffmpeg:', err.message);
-    });
+    ytdlp.stdout.pipe(ffmpeg.stdin).on('error', () => {});
+    ytdlp.stderr.on('data', () => {});
+    ytdlp.on('error', () => {});
+    ffmpeg.stdin.on('error', () => {});
+    ffmpeg.on('error', () => {});
 
     const resource = createAudioResource(ffmpeg.stdout);
     queue.player.play(resource);
@@ -190,4 +203,4 @@ function formatDuration(seconds) {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
-module.exports = { getQueue, createQueue, searchSong, playSong, formatDuration, queues };
+module.exports = { getQueue, createQueue, searchSong, playSong, formatDuration, killProcesses, queues };
